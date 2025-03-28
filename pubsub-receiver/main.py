@@ -1,29 +1,21 @@
 from google.cloud import pubsub_v1
-from google.cloud import language_v1
 import json
 
 publisher = pubsub_v1.PublisherClient()
-language_client = language_v1.LanguageServiceClient()
 topic_path = publisher.topic_path("training-triggering-pipeline", "feedback-topic")
 
 def receiver(request):
-    if request.method != "POST":
-        return "Method not allowed", 405
+    request_json = request.get_json()
+    if not request_json or "user_id" not in request_json or "message" not in request_json:
+        return "Invalid request", 400
 
-    data = request.get_json()
-    if not data or "user_id" not in data or "message" not in data:
-        return "Invalid request: user_id and message are required", 400
+    user_id = request_json["user_id"]
+    text = request_json["message"]
 
-    text = data["message"]
-    document = language_v1.Document(content=text, type_=language_v1.Document.Type.PLAIN_TEXT)
-    sentiment = language_client.analyze_sentiment(request={"document": document}).document_sentiment
-    score = sentiment.score
+    # Prepare the message to publish
+    message_data = json.dumps({"user_id": user_id, "message": text}).encode("utf-8")
 
-    tag = "positive" if score > 0.25 else "negative" if score < -0.25 else "neutral"
+    # Publish the message to the feedback-topic without sentiment analysis
+    publisher.publish(topic_path, message_data)
 
-    message_data = json.dumps(data).encode("utf-8")
-    try:
-        publisher.publish(topic_path, message_data, sentiment=tag)
-        return "Message published successfully", 200
-    except Exception as e:
-        return f"Error publishing message: {str(e)}", 500
+    return "Message published to feedback-topic", 200
